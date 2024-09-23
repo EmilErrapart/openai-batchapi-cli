@@ -6,6 +6,7 @@ setup(
     py_modules=['batchapi'],
     install_requires=[
         'Click',
+        'openai'
     ],
     entry_points={
         'console_scripts': [
