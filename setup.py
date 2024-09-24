@@ -6,7 +6,9 @@ setup(
     py_modules=['batchapi'],
     install_requires=[
         'Click',
-        'openai'
+        'openai',
+        'python-dotenv'
+        'pathlib'
     ],
     entry_points={
         'console_scripts': [

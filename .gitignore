@@ -1,6 +1,6 @@
 __pycache__
 .venv
 *.egg-info
-*.jsonl
-*.json
+.env
 /inputs
+/output

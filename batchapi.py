@@ -1,73 +1,70 @@
 import click
 import json
-from os import listdir
-from os.path import isfile, exists, join
+from os import listdir, mkdir
+from pathlib import Path
 from openai import OpenAI
+from dotenv import load_dotenv
 
+load_dotenv()
 client = OpenAI()
 batch_file_name = "batch.jsonl"
-ongoing_batch_jobs_file_name = "ongoing-batch-jobs.json"
+batch_job_file_name = "batchjob.json"
 
 @click.group()
 def cli():
     pass
 
 @cli.command()
-@click.argument('input_folder', type=click.Path(exists=True, file_okay=False))
-@click.argument('system_prompt')
-@click.argument('content_prefix', default="", required=False)
-def start(input_folder, system_prompt, content_prefix):
+@click.argument('input_folder_path', type=click.Path(exists=True, file_okay=False))
+@click.argument('output_folder_name')
+@click.option('-s', '--sys-prompt', "system_prompt", default="", help="String to be sent as system prompt")
+@click.option('-p', '--prefix', "user_content_prefix", default="", help="String to be prefixed before every user input")
+@click.option('-m', '--model', default="gpt-4o-mini", help="Specify a model to use. Default: gpt-4o-mini")
+def start(input_folder_path, output_folder_name, system_prompt, user_content_prefix, model):
     """Create and start a batch job."""
 
-    tasks = []
+    batch_output_path = Path("output", output_folder_name)
+    if batch_output_path.exists() and not any(batch_output_path.iterdir()):
+        raise Exception("Output folder is not empty")
 
-    for input_file_name in listdir(input_folder):
-        input_file_path = join(input_folder, input_file_name)
-        if not isfile(input_file_path):
-            continue
-        with open(input_file_path, "r") as file:
-            input_str = file.read()
+    batch_output_path.mkdir(exist_ok=True, parents=True)
+    batch_file_path = Path(batch_output_path, batch_file_name)
+
+    #create batch file
+    tasks = []
+    with batch_file_path.open('w') as batch_file:
+        for input_file_path in Path(input_folder_path).glob('*.txt'):
+            user_content = input_file_path.read_text()
             task = {
-                "custom_id": input_file_name,
+                "custom_id": input_file_path.stem,
                 "method": "POST",
                 "url": "/v1/chat/completions",
                 "body": {
-                    "model": "gpt-4o-mini",
+                    "model": model,
                     "messages": [
                         {
                             "role": "system",
                             "content": system_prompt
                         },{
                             "role": "user",
-                            "content": content_prefix + input_str
+                            "content": user_content_prefix + user_content
                         }
                     ]            
                 }
             }
-            tasks.append(task)
+            batch_file.write(json.dumps(task) + '\n')
 
-    with open(batch_file_name, 'w') as file:
-        for obj in tasks:
-            file.write(json.dumps(obj) + '\n')
-
+    #upload batch file
     batch_file = client.files.create(
-        file=open(batch_file_name, "rb"),
+        file=batch_file_path.open("rb"),
         purpose="batch"
     )
 
+    #create batch job
     batch_job = client.batches.create(
         input_file_id=batch_file.id,
         endpoint="/v1/chat/completions",
         completion_window="24h"
     )
-    
-    ongoing_batch_jobs = {}
-    
-    if exists(ongoing_batch_jobs_file_name):
-        with open(ongoing_batch_jobs_file_name, 'r') as file:
-            ongoing_batch_jobs = json.loads(file.read())
 
-    ongoing_batch_jobs.update({batch_job.id: input_folder})
-
-    with open(ongoing_batch_jobs_file_name, 'w') as file:
-        file.write(json.dumps(ongoing_batch_jobs))
+    Path(batch_output_path, batch_job_file_name).write_text(json.dumps(batch_job))
