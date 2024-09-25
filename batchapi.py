@@ -6,8 +6,6 @@ from dotenv import load_dotenv
 
 load_dotenv()
 client = OpenAI()
-batch_file_name = "batch.jsonl"
-batch_job_file_name = "batchjob.json"
 
 @click.group()
 def cli():
@@ -22,15 +20,19 @@ def cli():
 def start(input_folder_path, output_folder_name, system_prompt, user_content_prefix, model):
     """Create and start a batch job."""
 
+    if "/" in output_folder_name:
+        print("Output folder name must be a string not a path")
+        return
+
     batch_output_path = Path("output", output_folder_name)
     if batch_output_path.exists() and any(batch_output_path.iterdir()):
-        raise Exception("Output folder already exists and is not empty")
+        print("Output folder already exists and is not empty")
+        return
 
     batch_output_path.mkdir(exist_ok=True, parents=True)
-    batch_file_path = Path(batch_output_path, batch_file_name)
+    batch_file_path = Path(batch_output_path, "batch.jsonl")
 
     #create batch file
-    tasks = []
     with batch_file_path.open('w') as batch_file:
         for input_file_path in Path(input_folder_path).glob('*.txt'):
             user_content = input_file_path.read_text()
@@ -65,23 +67,25 @@ def start(input_folder_path, output_folder_name, system_prompt, user_content_pre
         endpoint="/v1/chat/completions",
         completion_window="24h"
     )
+    print(f"Created batch job with id: {batch_job.id}")
 
-    Path(batch_output_path, batch_job_file_name).write_text(json.dumps(batch_job))
+    save_batch_data(batch_job, batch_output_path)
 
 @cli.command()
 def check():
-    """Check and update status of any ongoing batch jobs. Download and save results of completed batches"""
+    """Retrieve and update status of any ongoing batch jobs. Download and save results of completed batches"""
     status_list = ["validating", "in_progress", "finalizing"]
     #check and update status
-    for ongoing in get_batch_jobs(status_list):
-        batch_job = client.batches.retrieve(ongoing['job']['id'])
-        batch_output_path = ongoing['path']
-        Path(batch_output_path, batch_job_file_name).write_text(json.dumps(batch_job))
+    for ongoing in get_batch_data_list(status_list):
+        batch_job = client.batches.retrieve(ongoing['id'])
+        batch_output_path = Path(ongoing['path'])
+        if batch_job.status != ongoing['status']:
+            save_batch_data(batch_job, batch_output_path)
 
         #download results file
         if batch_job.status != "completed": continue
         result_file_path = Path(batch_output_path, "results.jsonl")
-        result_file_path.write_text(client.files.content(batch_job.output_file_id).content)
+        result_file_path.write_bytes(client.files.content(batch_job.output_file_id).content)
 
         #read results file and save each response to separate file
         results_folder = Path(batch_output_path, "results")
@@ -90,15 +94,21 @@ def check():
             for line in result_file:
                 result_obj = json.loads(line.strip())
                 content = result_obj['response']['body']['choices'][0]['message']['content']
-                print(content)
                 Path(results_folder, result_obj["custom_id"]).with_suffix(".txt").write_text(content)
 
 @cli.command()
 def list_ongoing():
     """List currently ongoing batch jobs and their status"""
     status_list = ["validating", "in_progress", "finalizing"]
-    for ongoing in get_batch_jobs(status_list):
-        print(f"ID: {ongoing['job']['id']}, Status: {ongoing['job']['status']}, Output folder: {ongoing['path'].name}")
+    data = get_batch_data_list(status_list)
+    if not any(data):
+        print("No ongoing batch jobs")
+        return
+    for ongoing in data:
+        batch_id = ongoing['id']
+        status = ongoing['status']
+        output_folder = Path(ongoing['path']).name
+        print(f"ID: {batch_id}, Status: {status}, Output folder: {output_folder}")
 
 @cli.command()
 @click.argument('batch-id')
@@ -106,18 +116,24 @@ def cancel(batch_id):
     """Cancel batch job by batch id"""
     client.batches.cancel(batch_id)
 
-def get_batch_jobs(status_list):
-    #search every batch job file for given statuses and return batch job with its output path
+#search and return all batch data with specified status
+def get_batch_data_list(status_list):
     output = Path("output")
-    if not output.exists(): return
-    ongoing_batch_jobs = []
+    ongoing = []
+    if not output.exists(): return ongoing
     for batch_output_path in output.iterdir():
-        batch_job_file_path = Path(batch_output_path, batch_job_file_name)
-        if not batch_job_file_path.exists(): continue
-        batch_job = json.loads(batch_job_file_path.read_text())
-        if batch_job['status'] not in status_list: continue
-        ongoing_batch_jobs.append({
-            "job": batch_job,
-            "path": batch_output_path
-        })
-    return ongoing_batch_jobs
+        batch_data_path = Path(batch_output_path, "batch-data.json")
+        if batch_data_path.exists(): continue
+        batch_data = json.loads(batch_data_path.read_text())
+        if batch_data['status'] in status_list:
+            ongoing.append(batch_data)
+    return ongoing
+
+def save_batch_data(batch_job, batch_output_path):
+    batch_job_data = {
+        "id": batch_job.id,
+        "created_at": batch_job.created_at,
+        "status": batch_job.status,
+        "path": str(batch_output_path),
+    }
+    Path(batch_output_path, "batch-data.json").write_text(json.dumps(batch_job_data))
