@@ -7,7 +7,7 @@ setup(
     install_requires=[
         'Click',
         'openai',
-        'python-dotenv'
+        'python-dotenv',
         'pathlib'
     ],
     entry_points={
