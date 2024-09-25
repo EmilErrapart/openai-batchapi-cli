@@ -70,16 +70,20 @@ def start(input_folder_path, output_folder_name, system_prompt, user_content_pre
 
 @cli.command()
 def check():
-    """Check if any ongoing batch jobs have completed and save results."""
+    """Check and update status of any ongoing batch jobs. Download and save results of completed batches"""
     status_list = ["validating", "in_progress", "finalizing"]
+    #check and update status
     for ongoing in get_batch_jobs(status_list):
         batch_job = client.batches.retrieve(ongoing['job']['id'])
         batch_output_path = ongoing['path']
         Path(batch_output_path, batch_job_file_name).write_text(json.dumps(batch_job))
-        
+
+        #download results file
         if batch_job.status != "completed": continue
         result_file_path = Path(batch_output_path, "results.jsonl")
         result_file_path.write_text(client.files.content(batch_job.output_file_id).content)
+
+        #read results file and save each response to separate file
         results_folder = Path(batch_output_path, "results")
         results_folder.mkdir(exist_ok=True)
         with result_file_path.open('r') as result_file:
@@ -99,10 +103,11 @@ def list_ongoing():
 @cli.command()
 @click.argument('batch-id')
 def cancel(batch_id):
-    """Cancel batch job by id"""
+    """Cancel batch job by batch id"""
     client.batches.cancel(batch_id)
 
 def get_batch_jobs(status_list):
+    #search every batch job file for given statuses and return batch job with its output path
     output = Path("output")
     if not output.exists(): return
     ongoing_batch_jobs = []
