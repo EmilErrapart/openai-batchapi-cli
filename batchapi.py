@@ -76,17 +76,18 @@ def check():
         batch_job = client.batches.retrieve(ongoing['job']['id'])
         batch_output_path = ongoing['path']
         Path(batch_output_path, batch_job_file_name).write_text(json.dumps(batch_job))
-        if batch_job.status == "completed":
-            result_file_path = Path(batch_output_path, "results.jsonl")
-            result_file_path.write_text(client.files.content(batch_job.output_file_id).content)
-            results_folder = Path(batch_output_path, "results")
-            results_folder.mkdir(exist_ok=True)
-            with result_file_path.open('r') as result_file:
-                for line in result_file:
-                    result_obj = json.loads(line.strip())
-                    content = result_obj['response']['body']['choices'][0]['message']['content']
-                    print(content)
-                    Path(results_folder, result_obj["custom_id"]).with_suffix(".txt").write_text(content)
+        
+        if batch_job.status != "completed": continue
+        result_file_path = Path(batch_output_path, "results.jsonl")
+        result_file_path.write_text(client.files.content(batch_job.output_file_id).content)
+        results_folder = Path(batch_output_path, "results")
+        results_folder.mkdir(exist_ok=True)
+        with result_file_path.open('r') as result_file:
+            for line in result_file:
+                result_obj = json.loads(line.strip())
+                content = result_obj['response']['body']['choices'][0]['message']['content']
+                print(content)
+                Path(results_folder, result_obj["custom_id"]).with_suffix(".txt").write_text(content)
 
 @cli.command()
 def list_ongoing():
@@ -94,6 +95,12 @@ def list_ongoing():
     status_list = ["validating", "in_progress", "finalizing"]
     for ongoing in get_batch_jobs(status_list):
         print(f"ID: {ongoing['job']['id']}, Status: {ongoing['job']['status']}, Output folder: {ongoing['path'].name}")
+
+@cli.command()
+@click.argument('batch-id')
+def cancel(batch_id):
+    """Cancel batch job by id"""
+    client.batches.cancel(batch_id)
 
 def get_batch_jobs(status_list):
     output = Path("output")
