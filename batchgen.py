@@ -3,6 +3,8 @@ import json
 from pathlib import Path
 from openai import OpenAI
 from dotenv import load_dotenv
+import google.generativeai as genai
+import os
 
 load_dotenv()
 
@@ -22,7 +24,7 @@ def openai():
 @click.option('-p', '--prefix', "user_content_prefix", default="", help="String to be prefixed before every user input")
 @click.option('-m', '--model', default="gpt-4o-mini", help="Specify a model to use. Default: gpt-4o-mini")
 def start(input_folder_path, output_folder_name, system_prompt, user_content_prefix, model):
-    """Create and start a batch job. This does not wait for results, the 'check' command must be run to retrieve them"""
+    """Create and start a batch job. This does not wait for results, the 'check' command must be run separately to retrieve them"""
 
     if "/" in output_folder_name:
         print("Output folder name must be a string not a path")
@@ -37,7 +39,7 @@ def start(input_folder_path, output_folder_name, system_prompt, user_content_pre
     if not any(input_files):
         print("Input folder has no files of .txt format")
         return
-    
+
     batch_output_path.mkdir(exist_ok=True, parents=True)
     batch_file_path = Path(batch_output_path, "batch.jsonl")
 
@@ -87,7 +89,7 @@ def check():
     """Retrieve and update status of any ongoing batch jobs. Download and save results of completed batches"""
     client = OpenAI()
 
-    status_list = ["validating", "in_progress", "finalizing"]
+    status_list = ["validating", "in_progress", "finalizing", "cancelling"]
     data = get_batch_data_list(status_list)
     if not any(data):
         print("No ongoing batch jobs")
@@ -121,7 +123,6 @@ def check():
 
     if not status_changed:
         print("No changes in batch status")
-        
 
 @openai.command()
 def list_ongoing():
@@ -165,3 +166,43 @@ def save_batch_data(batch_job, batch_output_path):
         "path": str(batch_output_path),
     }
     Path(batch_output_path, "batch-data.json").write_text(json.dumps(batch_job_data))
+
+@cli.group()
+def google():
+    """Use a google model"""
+    pass
+
+@google.command()
+@click.argument('input_folder_path', type=click.Path(exists=True, file_okay=False))
+@click.argument('output_folder_name')
+@click.option('-s', '--sys-prompt', "system_prompt", default="", help="String to be sent as system prompt")
+@click.option('-p', '--prefix', "user_content_prefix", default="", help="String to be prefixed before every user input")
+@click.option('-m', '--model', default="gemini-1.5-flash", help="Specify a model to use. Default: gemini-1.5-flash")
+def start(input_folder_path, output_folder_name, system_prompt, user_content_prefix, model):
+    """Start a batch job. This waits for each result so it may take a while"""
+    if "/" in output_folder_name:
+        print("Output folder name must be a string not a path")
+        return
+
+    batch_output_path = Path("output", output_folder_name)
+    if batch_output_path.exists() and any(batch_output_path.iterdir()):
+        print("Output folder already exists and is not empty")
+        return
+
+    input_files = Path(input_folder_path).glob('*.txt')
+    if not any(input_files):
+        print("Input folder has no files of .txt format")
+        return
+
+    batch_output_path.mkdir(exist_ok=True, parents=True)
+
+    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+    model = genai.GenerativeModel(
+        model_name=model,
+        system_instruction=system_prompt
+    )
+
+    for input_file_path in input_files:
+        user_content = input_file_path.read_text()
+        response = model.generate_content(user_content_prefix + user_content)
+        Path(batch_output_path, input_file_path.name).write_text(response.text)

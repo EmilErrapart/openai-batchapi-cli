@@ -8,7 +8,8 @@ setup(
         'Click',
         'openai',
         'python-dotenv',
-        'pathlib'
+        'pathlib',
+        'google-generativeai'
     ],
     entry_points={
         'console_scripts': [
