@@ -1,9 +1,9 @@
 from setuptools import setup
 
 setup(
-    name='BatchApiCli',
+    name='BatchGenCli',
     version='1.0',
-    py_modules=['batchapi'],
+    py_modules=['batchgen'],
     install_requires=[
         'Click',
         'openai',
@@ -12,7 +12,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'batchapi=batchapi:cli',
+            'batchgen=batchgen:cli',
         ],
     },
 )

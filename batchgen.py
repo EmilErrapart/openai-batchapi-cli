@@ -5,10 +5,14 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
-client = OpenAI()
 
 @click.group()
 def cli():
+    pass
+
+@cli.group()
+def openai():
+    """Use an openai model"""
     pass
 
 @cli.command()
@@ -18,7 +22,7 @@ def cli():
 @click.option('-p', '--prefix', "user_content_prefix", default="", help="String to be prefixed before every user input")
 @click.option('-m', '--model', default="gpt-4o-mini", help="Specify a model to use. Default: gpt-4o-mini")
 def start(input_folder_path, output_folder_name, system_prompt, user_content_prefix, model):
-    """Create and start a batch job."""
+    """Create and start a batch job. This does not wait for results, the 'check' command must be run to retrieve them"""
 
     if "/" in output_folder_name:
         print("Output folder name must be a string not a path")
@@ -60,6 +64,8 @@ def start(input_folder_path, output_folder_name, system_prompt, user_content_pre
             }
             batch_file.write(json.dumps(task) + '\n')
 
+    client = OpenAI()
+
     #upload batch file
     batch_file = client.files.create(
         file=batch_file_path.open("rb"),
@@ -76,15 +82,26 @@ def start(input_folder_path, output_folder_name, system_prompt, user_content_pre
 
     save_batch_data(batch_job, batch_output_path)
 
-@cli.command()
+@openai.command()
 def check():
     """Retrieve and update status of any ongoing batch jobs. Download and save results of completed batches"""
+    client = OpenAI()
+
     status_list = ["validating", "in_progress", "finalizing"]
+    data = get_batch_data_list(status_list)
+    if not any(data):
+        print("No ongoing batch jobs")
+        return
+
+    status_changed = False
+
     #check and update status
-    for ongoing in get_batch_data_list(status_list):
+    for ongoing in data:
         batch_job = client.batches.retrieve(ongoing['id'])
         batch_output_path = Path(ongoing['path'])
         if batch_job.status != ongoing['status']:
+            status_changed = True
+            print(f"{batch_job.id} changed status from '{ongoing['status']}' to '{batch_job.status}'")
             save_batch_data(batch_job, batch_output_path)
 
         #download results file
@@ -94,6 +111,7 @@ def check():
 
         #read results file and save each response to separate file
         results_folder = Path(batch_output_path, "results")
+        print(f"Saving results of '{batch_job.id}' to {str(results_folder)}")
         results_folder.mkdir(exist_ok=True)
         with result_file_path.open('r') as result_file:
             for line in result_file:
@@ -101,7 +119,11 @@ def check():
                 content = result_obj['response']['body']['choices'][0]['message']['content']
                 Path(results_folder, result_obj["custom_id"]).with_suffix(".txt").write_text(content)
 
-@cli.command()
+    if not status_changed:
+        print("No changes in batch status")
+        
+
+@openai.command()
 def list_ongoing():
     """List currently ongoing batch jobs and their status"""
     status_list = ["validating", "in_progress", "finalizing"]
@@ -115,10 +137,11 @@ def list_ongoing():
         output_folder = Path(ongoing['path']).name
         print(f"ID: {batch_id}, Status: {status}, Output folder: {output_folder}")
 
-@cli.command()
+@openai.command()
 @click.argument('batch-id')
 def cancel(batch_id):
     """Cancel batch job by batch id"""
+    client = OpenAI()
     client.batches.cancel(batch_id)
 
 #search and return all batch data with specified status
