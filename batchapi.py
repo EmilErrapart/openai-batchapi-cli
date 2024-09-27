@@ -29,12 +29,17 @@ def start(input_folder_path, output_folder_name, system_prompt, user_content_pre
         print("Output folder already exists and is not empty")
         return
 
+    input_files = Path(input_folder_path).glob('*.txt')
+    if not any(input_files):
+        print("Input folder has no files of .txt format")
+        return
+    
     batch_output_path.mkdir(exist_ok=True, parents=True)
     batch_file_path = Path(batch_output_path, "batch.jsonl")
 
     #create batch file
     with batch_file_path.open('w') as batch_file:
-        for input_file_path in Path(input_folder_path).glob('*.txt'):
+        for input_file_path in input_files:
             user_content = input_file_path.read_text()
             task = {
                 "custom_id": input_file_path.stem,
